@@ -1,0 +1,38 @@
+from snakemake.utils import min_version
+
+min_version("6.8")
+
+
+configfile: "config/config.yaml"
+
+
+if config["original"]:
+    print("using original code")
+
+    include: "rules/original.smk"
+
+
+else:
+    print("using optimised code")
+
+    include: "rules/optimised.smk"
+
+
+SAMPLES = [re.sub(".cram$", "", line.strip()) for line in open(config["list_of_files"])]
+
+
+samplesmap = {}
+for l in [line.strip() for line in open(config["list_of_files"])]:
+    samplesmap[l.split()[0]] = l.split()[1]
+
+print(samplesmap)
+
+
+rule all:
+    input:
+        expand(
+            "{SM}.final-gatk.cram",
+            SM=samplesmap.keys(),
+        ),
+    message:
+        "done"

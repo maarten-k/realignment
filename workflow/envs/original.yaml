@@ -1,0 +1,15 @@
+channels:
+ - conda-forge
+ - bioconda
+ - default
+
+dependencies:
+ - bcftools=1.9
+ - bwa=0.7.17=h84994c4_4
+ - htslib=1.9
+ - samtools=1.9
+ - gatk4=4.1.4.0
+ - samblaster=0.1.24
+ - picard=2.21
+ - python > 3.6
+ - gatk=3.8
