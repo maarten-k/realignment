@@ -92,7 +92,9 @@ rule recalibrate:
 
 rule HaplotyperWGS:
     input:
-        "{SM}.final-gatk.cram",
+        cram="{SM}.final-gatk.cram",
+	index="{SM}.final-gatk.cram.crai"
+
     output:
         gvcf="{SM}.g.vcf.gz",
         index="{SM}.g.vcf.gz.tbi",
@@ -108,13 +110,15 @@ rule HaplotyperWGS:
         "copy-minimal"
     shell:
         """
-        wrk=$(pwd)
+        set -x
+	wrk=$(pwd)
+	
         # Call variants chr1
         echo -e "\\n\\nCalling chr1\\n" >> {log}
         mkdir -p ${{wrk}}/chr1
         cd ${{wrk}}/chr1
         set -x
-        gatk --java-options -Djava.io.tmpdir=. HaplotypeCaller -R {params.ref}  --dbsnp {params.dbSNP}  -I ../{input} -O ${{wrk}}/chr1/{wildcards.SM}.chr1.g.vcf.gz -L chr1 -ERC GVCF --native-pair-hmm-threads {threads} &>> {log}
+        gatk --java-options -Djava.io.tmpdir=. HaplotypeCaller -R {params.ref}  --dbsnp {params.dbSNP}  -I ${{wrk}}/{input.cram} -O ${{wrk}}/chr1/{wildcards.SM}.chr1.g.vcf.gz -L chr1 -ERC GVCF --native-pair-hmm-threads {threads} &>> ../{log}
 
 
         # Initialize gVCF and remove temp chrom dir
@@ -139,7 +143,7 @@ rule HaplotyperWGS:
             echo -e "\\n\\nCalling ${{chrom}}\\n" >> {log}
             mkdir -p ${{wrk}}/${{chrom}}
             cd ${{wrk}}/${{chrom}}
-            gatk --java-options -Djava.io.tmpdir=.  HaplotypeCaller -R {params.ref} --dbsnp {params.dbSNP} -I ../{input} -O ${{wrk}}/${{chrom}}/{wildcards.SM}.${{chrom}}.g.vcf.gz -L ${{chrom}} -ERC GVCF --native-pair-hmm-threads 2 &>> ${{wrk}}/{wildcards.SM}.vcf.log
+            gatk --java-options -Djava.io.tmpdir=.  HaplotypeCaller -R {params.ref} --dbsnp {params.dbSNP} -I ${{wrk}}/{input.cram} -O ${{wrk}}/${{chrom}}/{wildcards.SM}.${{chrom}}.g.vcf.gz -L ${{chrom}} -ERC GVCF --native-pair-hmm-threads 2 &>> ../{log}
 
             # Append to gVCF
             zcat ${{wrk}}/${{chrom}}/{wildcards.SM}.${{chrom}}.g.vcf.gz | grep -v "#" >> ${{wrk}}/{wildcards.SM}.g.vcf
