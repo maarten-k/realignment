@@ -1,3 +1,35 @@
+chromosomes = [
+    "chr1",
+    "chr2",
+    "chr3",
+    "chr4",
+    "chr5",
+    "chr6",
+    "chr7",
+    "chr8",
+    "chr9",
+    "chr10",
+    "chr11",
+    "chr12",
+    "chr13",
+    "chr14",
+    "chr15",
+    "chr16",
+    "chr17",
+    "chr18",
+    "chr19",
+    "chr20",
+    "chr21",
+    "chr22",
+    "chrX",
+    "chrY",
+]
+
+
+wildcard_constraints:
+    chr="chr[0-9XYM]{1,2}",
+    SM="[A-Za-z0-9]+",
+
 
 rule realign:
     input:
@@ -7,9 +39,9 @@ rule realign:
         index="{SM}.sorted.bam.bai",
     threads: 8
     conda:
-        "envs/optimised.yaml"
+        "../envs/optimised.yaml"
     shadow:
-        "shallow-copy"
+        "copy-minimal"
     params:
         ref=config["fasta"],
         refold=config["fasta_input"],
@@ -17,31 +49,37 @@ rule realign:
         "benchmarks/{SM}.bwa2.benchmark.txt"
     shell:
         """
+        echo "start $(date)"
         samtools index -@ {threads} {input.cram}
+        echo "indexed $(date)"
         samtools collate -@ {threads} --reference {params.refold} --output-fmt BAM -uOn 128 {input.cram} {wildcards.SM}.tmp |samtools bam2fq -@ {threads} -t -s /dev/null -1 {wildcards.SM}.R1.fq.gz -2 {wildcards.SM}.R2.fq.gz - > /dev/null
+         echo "collated $(date)"
         bwa-mem2 mem -K 100000000 -t {threads} -Y {params.ref} -R "@RG\\tID:{wildcards.SM}\\tLB:{wildcards.SM}\\tSM:{wildcards.SM}\\tPL:ILLUMINA" {wildcards.SM}.R1.fq.gz {wildcards.SM}.R2.fq.gz 2>> {wildcards.SM}.log | samblaster -a --addMateTags | samtools view -h1 --threads {threads} -bS > {wildcards.SM}.aln.bam
+         echo "bwa $(date)"
         rm -f {wildcards.SM}.R1.fq.gz {wildcards.SM}.R2.fq.gz
         samtools sort  -O bam -l 1 --write-index -@ {threads} {wildcards.SM}.aln.bam -o {output.bam}##idx##{output.index}
+         echo "sorted $(date)"
         """
 
 
 # BQSR_Loci=$(echo -L chr{1..22} | sed 's/ / -L /g' | sed 's/-L -L/-L/g')
 
 
-rule recalibrate:
+rule recalibrate_new:
     input:
         bam="{SM}.sorted.bam",
         bamindex="{SM}.sorted.bam.bai",
     output:
-        cram="{SM}.final-gatk.cram",
-        index="{SM}.final-gatk.cram.crai",
+        bam="{SM}.bqsr.bam",
         metrics_dedup="{SM}.dedupMetrics.txt",
     log:
         dedup="{SM}.dedup.log",
         bqsr="{SM}.bqsr.log",
     threads: 1
     conda:
-        "envs/optimised.yaml"
+        "../envs/optimised.yaml"
+    shadow:
+        "copy-minimal"
     params:
         ref=config["fasta"],
         dbSNP=config["dbSNP"],
@@ -49,110 +87,87 @@ rule recalibrate:
         Mills=config["Mills"],
         KnownIndels=config["KnownIndels"],
     benchmark:
-        "benchmarks/{SM}.recalibrate_opt.benchmark.txt"
+        "benchmarks/recalibrate_new-{SM}.txt"
     shell:
         """
-        wrk="."
-
-        picard -Djava.io.tmpdir=${{wrk}} MarkDuplicates I={input.bam} AS=true O={wildcards.SM}.dedup.bam METRICS_FILE={output.metrics_dedup} QUIET=true COMPRESSION_LEVEL=0 2>> {log.dedup}
+        echo "start $(date)"
+        picard -Djava.io.tmpdir={resources.tmpdir} MarkDuplicates I={input.bam} AS=true O={wildcards.SM}.dedup.bam METRICS_FILE={output.metrics_dedup} QUIET=true COMPRESSION_LEVEL=0 2>> {log.dedup}
         #why sort this stuff
-        samtools sort -m 6G -O bam -l 1 --write-index  -@ {threads} {wildcards.SM}.dedup.bam -o {wildcards.SM}.dedup-sorted.bam##bai##{wildcards.SM}.dedup-sorted.bam.bai 
+        echo "MarkDuplicated $(date)"
+        samtools sort -m 6G -O bam -l 1 --write-index  -@ {threads} {wildcards.SM}.dedup.bam -o {wildcards.SM}.dedup-sorted.bam##idx##{wildcards.SM}.dedup-sorted.bam.bai 
+        echo "sorted dedup.bam $(date)"
         rm {wildcards.SM}.dedup.bam
-        echo "removed dedup.bam"
 
-        gatk3 -Djava.io.tmpdir=${{wrk}} -T BaseRecalibrator -I {wildcards.SM}.dedup-sorted.bam -R {params.ref} -o {wildcards.SM}.recal -nct {threads} --downsample_to_fraction .1 {params.bqsr_loci} -knownSites {params.dbSNP} -knownSites {params.Mills} -knownSites {params.KnownIndels} 2>> {log.bqsr}
-        echo "BRC done"
 
-        gatk3 -Djava.io.tmpdir=${{wrk}}  -T PrintReads -I {wildcards.SM}.dedup-sorted.bam -R {params.ref} -nct {threads} --BQSR {wildcards.SM}.recal -o {wildcards.SM}.bqsr.bam --globalQScorePrior -1.0 --preserve_qscores_less_than 6 --static_quantized_quals 10 --static_quantized_quals 20 --static_quantized_quals 30 --disable_indel_quals 2>> 2{log.bqsr}
+        gatk3 -Djava.io.tmpdir={resources.tmpdir} -T BaseRecalibrator -I {wildcards.SM}.dedup-sorted.bam -R {params.ref} -o {wildcards.SM}.recal -nct {threads} --downsample_to_fraction .1 {params.bqsr_loci} -knownSites {params.dbSNP} -knownSites {params.Mills} -knownSites {params.KnownIndels} 2>> {log.bqsr}
+        echo "BaseRecalibrator done $(date)"
+
+        gatk3 -Djava.io.tmpdir={resources.tmpdir} -T PrintReads -I {wildcards.SM}.dedup-sorted.bam -R {params.ref} -nct {threads} --BQSR {wildcards.SM}.recal -o {output.bam} --globalQScorePrior -1.0 --preserve_qscores_less_than 6 --static_quantized_quals 10 --static_quantized_quals 20 --static_quantized_quals 30 --disable_indel_quals 2>> 2{log.bqsr}
         rm {wildcards.SM}.dedup-sorted.bam
-        #next line just might be a view (why sort an sorted file?)
-        samtools sort -m 6G -O CRAM --reference {params.ref}  --write-index -@ {threads} {wildcards.SM}.bqsr.bam -o {output.cram}
+        echo "printedreads $(date)"
+        """
+
+
+rule convert2cram_with_oldsamtools:
+    input:
+        bam="{SM}.bqsr.bam",
+    output:
+        cram="{SM}.final-gatk.cram",
+        index="{SM}.final-gatk.cram.crai",
+    shadow:
+        "copy-minimal"
+    threads: 1
+    conda:
+        "../envs/samtools1.9.yaml"
+    params:
+        ref=config["fasta"],
+    benchmark:
+        "benchmarks/convert2cram_with_oldsamtools-{SM}.txt"
+    shell:
+        """
+        samtools view -C -O CRAM -T {params.ref} -@ {threads} {input.bam} -o {output.cram}
+        samtools index {output.cram}
 
         """
 
 
-rule HaplotyperWGS:
+rule haplotype_per_chr:
     input:
-        "{SM}.final-gatk.cram",
+        cram="{SM}.final-gatk.cram",
+        index="{SM}.final-gatk.cram.crai",
     output:
-        "",
-    log:
-        "{SM}.vcf.log",
+        "{SM}/gvf/{SM}-{chr}.g.vcf.gz",
+    shadow:
+        "copy-minimal"
     conda:
-        "envs/optimised.yaml"
-    threads: 2
+        "../envs/optimised.yaml"
+    threads: 1
     params:
         ref=config["fasta"],
         dbSNP=config["dbSNP"],
+    benchmark:
+        "benchmarks/haployper{SM}-{chr}.txt"
     shell:
         """
-        wrk=".""
-        # Call variants chr1
-        echo -e "\\n\\nCalling chr1\\n" >> {log}
-        mkdir -p ${wrk}/chr1
-        cd ${wrk}/chr1
-        /usr/bin/time gatk4 -Djava.io.tmpdir=${wrk}/chr1 HaplotypeCaller -R {params.ref}  --dbsnp {params.dbSMP}  -I {input} -O ${wrk}/chr1/${SM}.chr1.g.vcf.gz -L chr1 -ERC GVCF --native-pair-hmm-threads {threads} &>> {log}
+        gatk --java-options -Djava.io.tmpdir={resources.tmpdir} HaplotypeCaller -R {params.ref}  --dbsnp {params.dbSNP}  -I {input.cram} -O {output} -L {wildcards.chr} --seconds-between-progress-updates 100 -ERC GVCF --native-pair-hmm-threads {threads} 
+        """
 
 
-        # Initialize gVCF and remove temp chrom dir
-        if [ -f ${wrk}/chr1/${SM}.chr1.g.vcf.gz ]
-        then
-            zcat ${wrk}/chr1/${SM}.chr1.g.vcf.gz > ${wrk}/${SM}.g.vcf
-            cd $wrk
-            rm -fr chr1
-        else
-            echo -e "\\nError during variant, exiting\\n"
-            cd ..
-            rm -fr ${SM}
-            exit 1
-        fi
-
-
-        # Iteratively haplotype caller and append to gVCF
-        for chrom in chr{2..22} chr{X..Y}
-            do
-
-            # Call variants
-            echo -e "\\n\\nCalling ${chrom}\\n" >> {log}
-            mkdir -p ${wrk}/${chrom}
-            cd ${wrk}/${chrom}
-            /usr/bin/time gatk4 -Djava.io.tmpdir=${wrk}/${chrom} -jar  HaplotypeCaller -R {params.ref} --dbsnp {params.dbSNP} -I {input} -O ${wrk}/${chrom}/${SM}.${chrom}.g.vcf.gz -L ${chrom} -ERC GVCF --native-pair-hmm-threads 2 &>> ${wrk}/${SM}.vcf.log
-
-            # Append to gVCF
-            zcat ${wrk}/${chrom}/${SM}.${chrom}.g.vcf.gz | grep -v "#" >> {${wrk}/${SM}.g.vcf}
-            cd $wrk
-            rm -fr ${chrom}
-        done
-
-
-        # Compress and index
-        ${BGZIP} -c ${wrk}/${SM}.g.vcf > {output.gvcf}
-        ${TABIX} -p vcf -f {output.gvcf}
-
-
-        # Calculate md5sum and check gVCF
-
-        acc=$(basename {output.gvcf} | cut -d \. -f 1)
-        base=$(basename {output.gvcf})
-
-
-        # Sanity check gVCF
-        iid=$(zcat {output.gvcf} | head -n 10000 | grep "#CHROM" | cut -f 10)
-        size=$(du -sh {output.gvcf} | awk '{print $1}')
-        ${TABIX} -R ${tgt} {output.gvcf}| bgzip -c > ${base}-exome-query.vcf.gz
-
-        length=$(zcat ${base}-exome-query.vcf.gz | wc -l)
-        width=$(zcat {output.gvcf} | grep -v "\#" | awk '{print NF}' | sort | uniq -c | awk '{print $2}' | sed 's/\n/,/g')
-        NVar=$(zgrep -c "MQ" ${base}-exome-query.vcf.gz)
-
-        # Summarise variants
-        GQ20=$(zgrep "MQ" ${base}-exome-query.vcf.gz | cut -f 10 | cut -d \: -f 4 | sort -n | awk '$1 > 20 {print}' | wc -l)
-        GQ60=$(zgrep "MQ" ${base}-exome-query.vcf.gz | cut -f 10 | cut -d \: -f 4 | sort -n | awk '$1 > 60 {print}' | wc -l)
-        GQ90=$(zgrep "MQ" ${base}-exome-query.vcf.gz | cut -f 10 | cut -d \: -f 4 | sort -n | awk '$1 > 90 {print}' | wc -l)
-        variantSummary=${GQ20},${GQ60},${GQ90}
-        rm -f ${base}-exome-query.vcf.gz
-
-        # Create table
-        echo -e "IID\\tAccession\\tgVCF\\tDisk_Usage\\tWidth\\tLength\\tN_Variants\\tN_dbSNP_Calls\\tGenome_GQ_Summary(GT_20,GT_60,GT_90)\\tVariant_GQ_Summary(GT_20,GT_60,GT_90)" > ${base}_checks.tsv
-        echo -e "${iid}\\t${acc}\\t${base}\\t${size}\\t${width}\\t${length}\\t${NVar}\\t${variantSummary}" >> ${base}_checks.tsv
+rule merge_gvcf:
+    input:
+        expand("{{SM}}/gvf/{{SM}}-{chr}.g.vcf.gz", chr=chromosomes),
+    output:
+        gvcf="{SM}.g.vcf.gz",
+        index="{SM}.g.vcf.gz.tbi",
+    conda:
+        "../envs/optimised.yaml"
+    benchmark:
+        "benchmarks/merge_gvcf-{SM}.txt"
+    shadow:
+        "copy-minimal"
+    threads: 1
+    shell:
+        """
+        bcftools concat -O z  -o {output.gvcf} {input}
+        tabix -p vcf  {output.gvcf}
         """
