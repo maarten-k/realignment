@@ -4,6 +4,8 @@ rule realign:
         cram=lambda wildcards: samplesmap[wildcards.SM],
     output:
         "{SM}.sorted.cram",
+    log:
+        bwa="{SM}.bwa.log",
     threads: 8
     conda:
         "../envs/original.yaml"
@@ -19,7 +21,7 @@ rule realign:
         echo "index $(date)"
         samtools bamshuf -@ 8 --reference {params.refold} --output-fmt BAM -uOn 128 {input.cram} {wildcards.SM}.tmp |samtools bam2fq -@ 8 -t -s /dev/null -1 {wildcards.SM}.R1.fq.gz -2 {wildcards.SM}.R2.fq.gz - > /dev/null
         echo "bamshuf $(date)"
-        bwa mem -K 100000000 -t 8 -Y {params.ref} -R "@RG\\tID:{wildcards.SM}\\tLB:{wildcards.SM}\\tSM:{wildcards.SM}\\tPL:ILLUMINA" {wildcards.SM}.R1.fq.gz {wildcards.SM}.R2.fq.gz 2>> {wildcards.SM}.log | samblaster -a --addMateTags | samtools view -h --threads {threads} -bS > {wildcards.SM}.aln.bam
+        bwa mem -K 100000000 -t 8 -Y {params.ref} -R "@RG\\tID:{wildcards.SM}\\tLB:{wildcards.SM}\\tSM:{wildcards.SM}\\tPL:ILLUMINA" {wildcards.SM}.R1.fq.gz {wildcards.SM}.R2.fq.gz 2>> {log.bwa} | samblaster -a --addMateTags | samtools view -h --threads {threads} -bS > {wildcards.SM}.aln.bam
         echo "bwa $(date)"
         rm -f {wildcards.SM}.R1.fq.gz {wildcards.SM}.R2.fq.gz
         samtools sort -@ 8 {wildcards.SM}.aln.bam > {wildcards.SM}.sorted.bam
@@ -93,8 +95,7 @@ rule recalibrate:
 rule HaplotyperWGS:
     input:
         cram="{SM}.final-gatk.cram",
-	index="{SM}.final-gatk.cram.crai"
-
+        index="{SM}.final-gatk.cram.crai",
     output:
         gvcf="{SM}.g.vcf.gz",
         index="{SM}.g.vcf.gz.tbi",
@@ -110,50 +111,50 @@ rule HaplotyperWGS:
         "copy-minimal"
     shell:
         """
-        set -x
-	wrk=$(pwd)
-	
-        # Call variants chr1
-        echo -e "\\n\\nCalling chr1\\n" >> {log}
-        mkdir -p ${{wrk}}/chr1
-        cd ${{wrk}}/chr1
-        set -x
-        gatk --java-options -Djava.io.tmpdir=. HaplotypeCaller -R {params.ref}  --dbsnp {params.dbSNP}  -I ${{wrk}}/{input.cram} -O ${{wrk}}/chr1/{wildcards.SM}.chr1.g.vcf.gz -L chr1 -ERC GVCF --native-pair-hmm-threads {threads} &>> ../{log}
+            set -x
+        wrk=$(pwd)
+
+            # Call variants chr1
+            echo -e "\\n\\nCalling chr1\\n" >> {log}
+            mkdir -p ${{wrk}}/chr1
+            cd ${{wrk}}/chr1
+            set -x
+            gatk --java-options -Djava.io.tmpdir=. HaplotypeCaller -R {params.ref}  --dbsnp {params.dbSNP}  -I ${{wrk}}/{input.cram} -O ${{wrk}}/chr1/{wildcards.SM}.chr1.g.vcf.gz -L chr1 -ERC GVCF --native-pair-hmm-threads {threads} &>> ../{log}
 
 
-        # Initialize gVCF and remove temp chrom dir
-        if [ -f ${{wrk}}/chr1/{wildcards.SM}.chr1.g.vcf.gz ]
-        then
-            zcat ${{wrk}}/chr1/{wildcards.SM}.chr1.g.vcf.gz > ${{wrk}}/{wildcards.SM}.g.vcf
-            cd ${{wrk}}
-            rm -fr chr1
-        else
-            echo -e "\\nError during variant, exiting\\n"
-            cd ..
-            rm -fr  ${{wrk}}/{wildcards.SM}.g.vcf
-            exit 1
-        fi
+            # Initialize gVCF and remove temp chrom dir
+            if [ -f ${{wrk}}/chr1/{wildcards.SM}.chr1.g.vcf.gz ]
+            then
+                zcat ${{wrk}}/chr1/{wildcards.SM}.chr1.g.vcf.gz > ${{wrk}}/{wildcards.SM}.g.vcf
+                cd ${{wrk}}
+                rm -fr chr1
+            else
+                echo -e "\\nError during variant, exiting\\n"
+                cd ..
+                rm -fr  ${{wrk}}/{wildcards.SM}.g.vcf
+                exit 1
+            fi
 
 
-        # Iteratively haplotype caller and append to gVCF
-        for chrom in chr{{2..22}} chr{{X..Y}}
-            do
+            # Iteratively haplotype caller and append to gVCF
+            for chrom in chr{{2..22}} chr{{X..Y}}
+                do
 
-            # Call variants
-            echo -e "\\n\\nCalling ${{chrom}}\\n" >> {log}
-            mkdir -p ${{wrk}}/${{chrom}}
-            cd ${{wrk}}/${{chrom}}
-            gatk --java-options -Djava.io.tmpdir=.  HaplotypeCaller -R {params.ref} --dbsnp {params.dbSNP} -I ${{wrk}}/{input.cram} -O ${{wrk}}/${{chrom}}/{wildcards.SM}.${{chrom}}.g.vcf.gz -L ${{chrom}} -ERC GVCF --native-pair-hmm-threads 2 &>> ../{log}
+                # Call variants
+                echo -e "\\n\\nCalling ${{chrom}}\\n" >> {log}
+                mkdir -p ${{wrk}}/${{chrom}}
+                cd ${{wrk}}/${{chrom}}
+                gatk --java-options -Djava.io.tmpdir=.  HaplotypeCaller -R {params.ref} --dbsnp {params.dbSNP} -I ${{wrk}}/{input.cram} -O ${{wrk}}/${{chrom}}/{wildcards.SM}.${{chrom}}.g.vcf.gz -L ${{chrom}} -ERC GVCF --native-pair-hmm-threads 2 &>> ../{log}
 
-            # Append to gVCF
-            zcat ${{wrk}}/${{chrom}}/{wildcards.SM}.${{chrom}}.g.vcf.gz | grep -v "#" >> ${{wrk}}/{wildcards.SM}.g.vcf
-            cd ${{wrk}}
-            rm -fr ${{chrom}}
-        done
+                # Append to gVCF
+                zcat ${{wrk}}/${{chrom}}/{wildcards.SM}.${{chrom}}.g.vcf.gz | grep -v "#" >> ${{wrk}}/{wildcards.SM}.g.vcf
+                cd ${{wrk}}
+                rm -fr ${{chrom}}
+            done
 
 
-        bgzip -c ${{wrk}}/{wildcards.SM}.g.vcf > {output.gvcf}
-        tabix -p vcf -f {output.gvcf}
+            bgzip -c ${{wrk}}/{wildcards.SM}.g.vcf > {output.gvcf}
+            tabix -p vcf -f {output.gvcf}
 
 
         """
