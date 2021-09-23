@@ -41,7 +41,7 @@ rule realign:
     conda:
         "../envs/optimised.yaml"
     log:
-        "{SM}_bwa.log"
+        "{SM}_bwa.log",
     shadow:
         "copy-minimal"
     params:
@@ -66,7 +66,6 @@ rule realign:
 
 
 # BQSR_Loci=$(echo -L chr{1..22} | sed 's/ / -L /g' | sed 's/-L -L/-L/g')
-
 
 
 rule recalibrate_new:
