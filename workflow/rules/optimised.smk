@@ -28,7 +28,7 @@ chromosomes = [
 
 wildcard_constraints:
     chr="chr[0-9XYM]{1,2}",
-    SM="[A-Za-z0-9]+",
+    SM="[A-Za-z0-9_-]+",
 
 
 rule realign:
@@ -40,6 +40,8 @@ rule realign:
     threads: 8
     conda:
         "../envs/optimised.yaml"
+    log:
+        "{SM}_bwa.log"
     shadow:
         "copy-minimal"
     params:
@@ -54,15 +56,17 @@ rule realign:
         echo "indexed $(date)"
         samtools collate -@ {threads} --reference {params.refold} --output-fmt BAM -uOn 128 {input.cram} {wildcards.SM}.tmp |samtools bam2fq -@ {threads} -t -s /dev/null -1 {wildcards.SM}.R1.fq.gz -2 {wildcards.SM}.R2.fq.gz - > /dev/null
          echo "collated $(date)"
-        bwa-mem2 mem -K 100000000 -t {threads} -Y {params.ref} -R "@RG\\tID:{wildcards.SM}\\tLB:{wildcards.SM}\\tSM:{wildcards.SM}\\tPL:ILLUMINA" {wildcards.SM}.R1.fq.gz {wildcards.SM}.R2.fq.gz 2>> {wildcards.SM}.log | samblaster -a --addMateTags | samtools view -h1 --threads {threads} -bS > {wildcards.SM}.aln.bam
+        bwa-mem2 mem -K 100000000 -t {threads} -Y {params.ref} -R "@RG\\tID:{wildcards.SM}\\tLB:{wildcards.SM}\\tSM:{wildcards.SM}\\tPL:ILLUMINA" {wildcards.SM}.R1.fq.gz {wildcards.SM}.R2.fq.gz 2>> {log} | samblaster -a --addMateTags | samtools view -h1 --threads {threads} -o  {wildcards.SM}.aln.bam
          echo "bwa $(date)"
         rm -f {wildcards.SM}.R1.fq.gz {wildcards.SM}.R2.fq.gz
-        samtools sort  -O bam -l 1 --write-index -@ {threads} {wildcards.SM}.aln.bam -o {output.bam}##idx##{output.index}
-         echo "sorted $(date)"
+        samtools sort -T /tmp/{wildcards.SM} --write-index  -m 7G -l 1 -@ {threads} {wildcards.SM}.aln.bam -o {output.bam}##idx##{output.index}
+
+        echo "sorted $(date)"
         """
 
 
 # BQSR_Loci=$(echo -L chr{1..22} | sed 's/ / -L /g' | sed 's/-L -L/-L/g')
+
 
 
 rule recalibrate_new:
@@ -94,16 +98,17 @@ rule recalibrate_new:
         picard -Djava.io.tmpdir={resources.tmpdir} MarkDuplicates I={input.bam} AS=true O={wildcards.SM}.dedup.bam METRICS_FILE={output.metrics_dedup} QUIET=true COMPRESSION_LEVEL=0 2>> {log.dedup}
         #why sort this stuff
         echo "MarkDuplicated $(date)"
-        samtools sort -m 6G -O bam -l 1 --write-index  -@ {threads} {wildcards.SM}.dedup.bam -o {wildcards.SM}.dedup-sorted.bam##idx##{wildcards.SM}.dedup-sorted.bam.bai 
-        echo "sorted dedup.bam $(date)"
-        rm {wildcards.SM}.dedup.bam
-
-
-        gatk3 -Djava.io.tmpdir={resources.tmpdir} -T BaseRecalibrator -I {wildcards.SM}.dedup-sorted.bam -R {params.ref} -o {wildcards.SM}.recal -nct {threads} --downsample_to_fraction .1 {params.bqsr_loci} -knownSites {params.dbSNP} -knownSites {params.Mills} -knownSites {params.KnownIndels} 2>> {log.bqsr}
+        #samtools sort -m 7G  -l 1  -T /tmp/{wildcards.SM} --write-index  -@ {threads} {wildcards.SM}.dedup.bam -o {wildcards.SM}.dedup-sorted.bam##idx##{wildcards.SM}.dedup-sorted.bam.bai 
+        #echo "sorted dedup.bam $(date)"
+        #rm {wildcards.SM}.dedup.bam
+        samtools index -@ {threads} {wildcards.SM}.dedup.bam
+        echo "indexed dedup $(date)"
+        cp {wildcards.SM}.dedup.bam  ~/.
+        gatk3 -Xmx8G -Djava.io.tmpdir={resources.tmpdir} -T BaseRecalibrator -I {wildcards.SM}.dedup.bam -R {params.ref} -o {wildcards.SM}.recal -nct {threads} --downsample_to_fraction .1 {params.bqsr_loci} -knownSites {params.dbSNP} -knownSites {params.Mills} -knownSites {params.KnownIndels} 2>> {log.bqsr}
         echo "BaseRecalibrator done $(date)"
 
-        gatk3 -Djava.io.tmpdir={resources.tmpdir} -T PrintReads -I {wildcards.SM}.dedup-sorted.bam -R {params.ref} -nct {threads} --BQSR {wildcards.SM}.recal -o {output.bam} --globalQScorePrior -1.0 --preserve_qscores_less_than 6 --static_quantized_quals 10 --static_quantized_quals 20 --static_quantized_quals 30 --disable_indel_quals 2>> 2{log.bqsr}
-        rm {wildcards.SM}.dedup-sorted.bam
+        gatk3 -Xmx8G -Djava.io.tmpdir={resources.tmpdir} -T PrintReads -I {wildcards.SM}.dedup.bam -R {params.ref} -nct {threads} --BQSR {wildcards.SM}.recal -o {output.bam} --globalQScorePrior -1.0 --preserve_qscores_less_than 6 --static_quantized_quals 10 --static_quantized_quals 20 --static_quantized_quals 30 --disable_indel_quals 2>> {log.bqsr}
+        #rm {wildcards.SM}.dedup-sorted.bam
         echo "printedreads $(date)"
         """
 

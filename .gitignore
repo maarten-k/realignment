@@ -1,0 +1,3 @@
+.snakemake
+slurm-*.out
+slurm-*
