@@ -1,3 +1,9 @@
 .snakemake
-slurm-*.out
 slurm-*
+*.bam
+*.bam.bai
+*.cram.crai
+*.cram
+*.log
+*.vcf.gz
+*.vcf.gz.tbi
