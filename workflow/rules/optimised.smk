@@ -35,8 +35,8 @@ rule realign:
     input:
         cram=lambda wildcards: samplesmap[wildcards.SM],
     output:
-        bam="{SM}.sorted.bam",
-        index="{SM}.sorted.bam.bai",
+        bam=temp("{SM}.sorted.bam"),
+        index=temp("{SM}.sorted.bam.bai"),
     threads: 8
     conda:
         "../envs/optimised.yaml"
@@ -73,7 +73,7 @@ rule recalibrate_new:
         bam="{SM}.sorted.bam",
         bamindex="{SM}.sorted.bam.bai",
     output:
-        bam="{SM}.bqsr.bam",
+        bam=temp("{SM}.bqsr.bam"),
         metrics_dedup="{SM}.dedupMetrics.txt",
     log:
         dedup="{SM}.dedup.log",
@@ -130,7 +130,7 @@ rule convert2cram_with_oldsamtools:
     shell:
         """
         samtools view -C -O CRAM -T {params.ref} -@ {threads} {input.bam} -o {output.cram}
-        samtools index {output.cram}
+        samtools index -@ {threads} {output.cram}
 
         """
 
@@ -140,7 +140,7 @@ rule haplotype_per_chr:
         cram="{SM}.final-gatk.cram",
         index="{SM}.final-gatk.cram.crai",
     output:
-        "{SM}/gvf/{SM}-{chr}.g.vcf.gz",
+        temp("{SM}/gvf/{SM}-{chr}.g.vcf.gz"),
     shadow:
         "copy-minimal"
     conda:
@@ -174,4 +174,33 @@ rule merge_gvcf:
         """
         bcftools concat -O z  -o {output.gvcf} {input}
         tabix -p vcf  {output.gvcf}
+        """
+
+rule HaplotyperExome:
+    input:
+        cram="{SM}.final-gatk.cram",
+        index="{SM}.final-gatk.cram.crai",
+    output:
+        gvcf="{SM}.WXS.g.vcf.gz",
+        index="{SM}.WXS.g.vcf.gz.tbi",
+    log:
+        "{SM}.WXS.vcf.log",
+    conda:
+        "../envs/optimised.yaml"
+    threads: 2
+    params:
+        ref=config["fasta"],
+        dbSNP=config["dbSNP"],
+        tgt=config["tgt"],
+
+    shadow:
+        "copy-minimal"
+    shell:
+        """
+        touch {input.index}
+        gatk --java-options -Djava.io.tmpdir={resources.tmpdir} HaplotypeCaller -R {params.ref}  --dbsnp {params.dbSNP}  -I {input.cram} -O {output.gvcf} -ERC GVCF -L {params.tgt} --seconds-between-progress-updates 100 --native-pair-hmm-threads {threads} &>> {log}
+        mv {output.gvcf} {output.gvcf}.tmp
+        zcat {output.gvcf}.tmp |bgzip -@ {threads} -l 6 -c> {output.gvcf}
+
+        tabix -fp vcf {output.gvcf}
         """
