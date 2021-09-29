@@ -158,3 +158,30 @@ rule HaplotyperWGS:
 
 
         """
+
+
+
+rule HaplotyperExome:
+    input:
+        cram="{SM}.final-gatk.cram",
+        index="{SM}.final-gatk.cram.crai", 
+    output:
+        gvcf="{SM}.WXS.g.vcf.gz",
+        index="{SM}.WXS.g.vcf.gz.tbi",
+    log:
+        "{SM}.WXS.vcf.log",
+    conda:
+        "../envs/original.yaml"
+    threads: 2
+    params:
+        ref=config["fasta"],
+        dbSNP=config["dbSNP"],
+        tgt=config["tgt"],
+
+    shadow:
+        "copy-minimal"
+    shell:
+        """
+        gatk --java-options -Djava.io.tmpdir=. HaplotypeCaller -R {params.ref} --dbsnp {params.dbSNP} -I {input.cram} -O {output.gvcf} -ERC GVCF  -L {params.tgt} --native-pair-hmm-threads {threads} &>> {log}
+        tabix -fp vcf {output.gvcf}
+        """
