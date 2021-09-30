@@ -31,6 +31,9 @@ wildcard_constraints:
     SM="[A-Za-z0-9_-]+",
 
 
+ruleorder: index_cram > convert2cram_with_oldsamtools
+
+
 rule realign:
     input:
         cram=lambda wildcards: samplesmap[wildcards.SM],
@@ -176,6 +179,7 @@ rule merge_gvcf:
         tabix -p vcf  {output.gvcf}
         """
 
+
 rule HaplotyperExome:
     input:
         cram="{SM}.final-gatk.cram",
@@ -192,7 +196,6 @@ rule HaplotyperExome:
         ref=config["fasta"],
         dbSNP=config["dbSNP"],
         tgt=config["tgt"],
-
     shadow:
         "copy-minimal"
     shell:
@@ -203,4 +206,18 @@ rule HaplotyperExome:
         zcat {output.gvcf}.tmp |bgzip -@ {threads} -l 6 -c> {output.gvcf}
 
         tabix -fp vcf {output.gvcf}
+        """
+
+
+rule index_cram:
+    input:
+        cram="{SM}.final-gatk.cram",
+    output:
+        index="{SM}.final-gatk.cram.crai",
+    conda:
+        "../envs/optimised.yaml"
+    threads: 1
+    shell:
+        """
+        samtools index {input.cram}
         """
