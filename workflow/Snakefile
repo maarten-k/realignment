@@ -44,3 +44,13 @@ rule gvcf:
         ),
     message:
         "done"
+
+
+rule gvcf_exome:
+    input:
+        expand(
+            "{SM}.WXS.g.vcf.gz",
+            SM=samplesmap.keys(),
+        ),
+    message:
+        "done"
