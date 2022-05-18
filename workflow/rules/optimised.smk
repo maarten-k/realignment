@@ -31,16 +31,41 @@ wildcard_constraints:
     SM="[A-Za-z0-9_-]+",
 
 
+localrules:
+    fetch_from_gridstorage,
+
+
 ruleorder: index_cram > convert2cram_with_oldsamtools
+
+
+rule fetch_from_gridstorage:
+    output:
+        cram=temp("ingress/{SM}.cram"),
+    threads: 1
+    resources:
+        mem_mb=500,
+    shell:
+        """
+        set +u
+            eval "$(command conda 'shell.bash' 'hook' 2> /dev/null)"
+            conda activate /cvmfs/softdrive.nl/projectmine_sw/software
+            set -u
+            pm_copy /projectmine-nfs/Tape/User/kooyman/UploadFromBroad/{wildcards.SM}.cram  {output.cram}
+            set +u
+            conda deactivate
+            set -u
+        """
 
 
 rule realign:
     input:
-        cram=lambda wildcards: samplesmap[wildcards.SM],
+        cram="ingress/{SM}.cram",
     output:
         bam=temp("{SM}.sorted.bam"),
         index=temp("{SM}.sorted.bam.bai"),
     threads: 8
+    resources:
+        mem_mb=24000,
     conda:
         "../envs/optimised.yaml"
     log:
@@ -57,7 +82,7 @@ rule realign:
         echo "start $(date)"
         samtools index -@ {threads} {input.cram}
         echo "indexed $(date)"
-        samtools collate -@ {threads} --reference {params.refold} --output-fmt BAM -uOn 128 {input.cram} {wildcards.SM}.tmp |samtools bam2fq -@ {threads} -t -s /dev/null -1 {wildcards.SM}.R1.fq.gz -2 {wildcards.SM}.R2.fq.gz - > /dev/null
+        samtools collate -@ {threads} --output-fmt BAM -uOn 128 {input.cram} {wildcards.SM}.tmp |samtools bam2fq -@ {threads} -t -s /dev/null -1 {wildcards.SM}.R1.fq.gz -2 {wildcards.SM}.R2.fq.gz - > /dev/null
          echo "collated $(date)"
         bwa-mem2 mem -K 100000000 -t {threads} -Y {params.ref} -R "@RG\\tID:{wildcards.SM}\\tLB:{wildcards.SM}\\tSM:{wildcards.SM}\\tPL:ILLUMINA" {wildcards.SM}.R1.fq.gz {wildcards.SM}.R2.fq.gz 2>> {log} | samblaster -a --addMateTags | samtools view -h1 --threads {threads} -o  {wildcards.SM}.aln.bam
          echo "bwa $(date)"
@@ -81,7 +106,10 @@ rule recalibrate_new:
     log:
         dedup="{SM}.dedup.log",
         bqsr="{SM}.bqsr.log",
+    resources:
+        mem_mb=8000,
     threads: 1
+    priority: 50
     conda:
         "../envs/optimised.yaml"
     shadow:
@@ -97,7 +125,7 @@ rule recalibrate_new:
     shell:
         """
         echo "start $(date)"
-        picard -Djava.io.tmpdir={resources.tmpdir} MarkDuplicates I={input.bam} AS=true O={wildcards.SM}.dedup.bam METRICS_FILE={output.metrics_dedup} QUIET=true COMPRESSION_LEVEL=0 2>> {log.dedup}
+        picard -Djava.io.tmpdir={resources.tmpdir} MarkDuplicates I={input.bam} AS=true O={wildcards.SM}.dedup.bam METRICS_FILE={output.metrics_dedup} QUIET=true COMPRESSION_LEVEL=1 2>> {log.dedup}
         #why sort this stuff
         echo "MarkDuplicated $(date)"
         #samtools sort -m 7G  -l 1  -T /tmp/{wildcards.SM} --write-index  -@ {threads} {wildcards.SM}.dedup.bam -o {wildcards.SM}.dedup-sorted.bam##idx##{wildcards.SM}.dedup-sorted.bam.bai 
@@ -105,12 +133,10 @@ rule recalibrate_new:
         #rm {wildcards.SM}.dedup.bam
         samtools index -@ {threads} {wildcards.SM}.dedup.bam
         echo "indexed dedup $(date)"
-        cp {wildcards.SM}.dedup.bam  ~/.
         gatk3 -Xmx8G -Djava.io.tmpdir={resources.tmpdir} -T BaseRecalibrator -I {wildcards.SM}.dedup.bam -R {params.ref} -o {wildcards.SM}.recal -nct {threads} --downsample_to_fraction .1 {params.bqsr_loci} -knownSites {params.dbSNP} -knownSites {params.Mills} -knownSites {params.KnownIndels} 2>> {log.bqsr}
         echo "BaseRecalibrator done $(date)"
 
         gatk3 -Xmx8G -Djava.io.tmpdir={resources.tmpdir} -T PrintReads -I {wildcards.SM}.dedup.bam -R {params.ref} -nct {threads} --BQSR {wildcards.SM}.recal -o {output.bam} --globalQScorePrior -1.0 --preserve_qscores_less_than 6 --static_quantized_quals 10 --static_quantized_quals 20 --static_quantized_quals 30 --disable_indel_quals 2>> {log.bqsr}
-        #rm {wildcards.SM}.dedup-sorted.bam
         echo "printedreads $(date)"
         """
 
@@ -123,7 +149,10 @@ rule convert2cram_with_oldsamtools:
         index="{SM}.final-gatk.cram.crai",
     shadow:
         "copy-minimal"
+    resources:
+        mem_mb=2000,
     threads: 1
+    priority: 60
     conda:
         "../envs/samtools1.9.yaml"
     params:
@@ -149,6 +178,8 @@ rule haplotype_per_chr:
     conda:
         "../envs/optimised.yaml"
     threads: 1
+    resources:
+        mem_mb=8000,
     params:
         ref=config["fasta"],
         dbSNP=config["dbSNP"],
@@ -168,11 +199,14 @@ rule merge_gvcf:
         index="{SM}.g.vcf.gz.tbi",
     conda:
         "../envs/optimised.yaml"
+    resources:
+        mem_mb=8000,
     benchmark:
         "benchmarks/merge_gvcf-{SM}.txt"
     shadow:
         "copy-minimal"
     threads: 1
+    priority: 100
     shell:
         """
         bcftools concat -O z  -o {output.gvcf} {input}
@@ -192,6 +226,8 @@ rule HaplotyperExome:
     conda:
         "../envs/optimised.yaml"
     threads: 2
+    resources:
+        mem_mb=8000,
     params:
         ref=config["fasta"],
         dbSNP=config["dbSNP"],
@@ -214,6 +250,8 @@ rule index_cram:
         cram="{SM}.final-gatk.cram",
     output:
         index="{SM}.final-gatk.cram.crai",
+    resources:
+        mem_mb=1000,
     conda:
         "../envs/optimised.yaml"
     threads: 1
