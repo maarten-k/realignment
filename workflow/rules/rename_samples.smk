@@ -55,6 +55,8 @@ rule all:
         expand("renamed/{newname}.final-gatk.cram", newname=mapx.values()),
     output:
         "rename.done",
+    resources:
+        mem_mb=100,
     shell:
         "touch {output}"
 
@@ -87,5 +89,7 @@ rule upload_all:
         expand("renamed/{newname}.uploaded", newname=mapx.values()),
     output:
         "upload_all.done",
+    resources:
+        mem_mb=100,
     shell:
         "touch {output}"
