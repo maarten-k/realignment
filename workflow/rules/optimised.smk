@@ -28,7 +28,7 @@ chromosomes = [
 
 wildcard_constraints:
     chr="chr[0-9XYM]{1,2}",
-    SM="[A-Za-z0-9_-]+",
+    SM="[A-Za-z0-9_\-\.]+",
 
 
 localrules:

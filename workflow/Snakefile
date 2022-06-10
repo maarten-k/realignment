@@ -16,6 +16,7 @@ else:
     print("using optimised code")
 
     include: "rules/optimised.smk"
+    include: "rules/fastq.smk"
 
 
 SAMPLES = [re.sub(".cram$", "", line.strip()) for line in open(config["list_of_files"])]
