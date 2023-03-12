@@ -1,0 +1,10 @@
+channels:
+ - conda-forge
+ - bioconda
+ - default
+
+dependencies:
+ - bwa-mem2=2.2.1
+ - htslib=1.16
+ - samtools=1.16.1
+ - samblaster=0.1.24

@@ -57,6 +57,35 @@ rule fetch_from_gridstorage:
         """
 
 
+rule realign_pipe:
+    input:
+        cram="ingress/{SM}.cram",
+    output:
+        bam=temp("{SM}.sorted_pipe.bam"),
+        index=temp("{SM}.sorted_pipe.bam.bai"),
+    threads: 8
+    resources:
+        mem_mb=24000,
+    conda:
+        "../envs/realign.yaml"
+    log:
+        "{SM}_bwa.log",
+    shadow:
+        "copy-minimal"
+    params:
+        ref=config["fasta"],
+        refold=config["fasta_input"],
+    benchmark:
+        "benchmarks/{SM}.bwa2_pipe.benchmark.txt"
+    shell:
+        """
+
+       samtools collate -@{threads} --output-fmt BAM -uOn 128 {input.cram} /tmp/{wildcards.SM}.tmp |samtools bam2fq -@8 -t -s /dev/null | bwa-mem2 mem -K 100000000 -pt {threads} -Y {params.ref} -R "@RG\\tID:{wildcards.SM}\\tLB:{wildcards.SM}\\tSM:{wildcards.SM}\\tPL:ILLUMINA" - 2>> {log} | samblaster -a --addMateTags |samtools sort -T /tmp/{wildcards.SM} --write-index  -m 1G -l 1 -@ {threads}  -o {output.bam}##idx##{output.index}
+
+        """
+
+
+
 rule realign:
     input:
         cram="ingress/{SM}.cram",
@@ -88,7 +117,6 @@ rule realign:
          echo "bwa $(date)"
         rm -f {wildcards.SM}.R1.fq.gz {wildcards.SM}.R2.fq.gz
         samtools sort -T /tmp/{wildcards.SM} --write-index  -m 7G -l 1 -@ {threads} {wildcards.SM}.aln.bam -o {output.bam}##idx##{output.index}
-
         echo "sorted $(date)"
         """
 
@@ -126,11 +154,7 @@ rule recalibrate_new:
         """
         echo "start $(date)"
         picard -Djava.io.tmpdir={resources.tmpdir} MarkDuplicates I={input.bam} AS=true O={wildcards.SM}.dedup.bam METRICS_FILE={output.metrics_dedup} QUIET=true COMPRESSION_LEVEL=1 2>> {log.dedup}
-        #why sort this stuff
         echo "MarkDuplicated $(date)"
-        #samtools sort -m 7G  -l 1  -T /tmp/{wildcards.SM} --write-index  -@ {threads} {wildcards.SM}.dedup.bam -o {wildcards.SM}.dedup-sorted.bam##idx##{wildcards.SM}.dedup-sorted.bam.bai 
-        #echo "sorted dedup.bam $(date)"
-        #rm {wildcards.SM}.dedup.bam
         samtools index -@ {threads} {wildcards.SM}.dedup.bam
         echo "indexed dedup $(date)"
         gatk3 -Xmx8G -Djava.io.tmpdir={resources.tmpdir} -T BaseRecalibrator -I {wildcards.SM}.dedup.bam -R {params.ref} -o {wildcards.SM}.recal -nct {threads} --downsample_to_fraction .1 {params.bqsr_loci} -knownSites {params.dbSNP} -knownSites {params.Mills} -knownSites {params.KnownIndels} 2>> {log.bqsr}
@@ -145,8 +169,8 @@ rule convert2cram_with_oldsamtools:
     input:
         bam="{SM}.bqsr.bam",
     output:
-        cram="{SM}.final-gatk.cram",
-        index="{SM}.final-gatk.cram.crai",
+        cram="results/{SM}/}{SM}.final-gatk.cram",
+        index="results/{SM}/{SM}.final-gatk.cram.crai",
     shadow:
         "copy-minimal"
     resources:
@@ -169,14 +193,14 @@ rule convert2cram_with_oldsamtools:
 
 rule haplotype_per_chr:
     input:
-        cram="{SM}.final-gatk.cram",
-        index="{SM}.final-gatk.cram.crai",
+        cram="results/{SM}/{SM}.final-gatk.cram",
+        index="results/{SM}/{SM}.final-gatk.cram.crai",
     output:
         temp("{SM}/gvf/{SM}-{chr}.g.vcf.gz"),
     shadow:
         "copy-minimal"
     conda:
-        "../envs/optimised.yaml"
+        "../envs/GATK_haplotyper.yaml"
     threads: 1
     resources:
         mem_mb=8000,
@@ -198,7 +222,7 @@ rule merge_gvcf:
         gvcf="{SM}.g.vcf.gz",
         index="{SM}.g.vcf.gz.tbi",
     conda:
-        "../envs/optimised.yaml"
+        "../envs/bcftools.yaml"
     resources:
         mem_mb=8000,
     benchmark:
@@ -209,7 +233,7 @@ rule merge_gvcf:
     priority: 100
     shell:
         """
-        bcftools concat -O z  -o {output.gvcf} {input}
+        bcftools concat -O z8  -o {output.gvcf} {input}
         tabix -p vcf  {output.gvcf}
         """
 
