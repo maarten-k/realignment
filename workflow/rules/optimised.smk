@@ -37,35 +37,15 @@ localrules:
 
 ruleorder: index_cram > convert2cram_with_oldsamtools
 
-
-rule fetch_from_gridstorage:
-    output:
-        cram=temp("ingress/{SM}.cram"),
-    threads: 1
-    resources:
-        mem_mb=500,
-    shell:
-        """
-        set +u
-            eval "$(command conda 'shell.bash' 'hook' 2> /dev/null)"
-            conda activate /cvmfs/softdrive.nl/projectmine_sw/software
-            set -u
-            pm_copy /projectmine-nfs/Tape/User/kooyman/UploadFromBroad/{wildcards.SM}.cram  {output.cram}
-            set +u
-            conda deactivate
-            set -u
-        """
-
-
 rule realign_pipe:
     input:
         cram="ingress/{SM}.cram",
     output:
-        bam=temp("{SM}.sorted_pipe.bam"),
-        index=temp("{SM}.sorted_pipe.bam.bai"),
+        bam=temp("results/{SM}/{SM}.sorted_pipe.bam"),
+        index=temp("results/{SM}/{SM}.sorted_pipe.bam.bai"),
     threads: 8
     resources:
-        mem_mb=24000,
+        mem_mb=54000,
     conda:
         "../envs/realign.yaml"
     log:
@@ -80,68 +60,36 @@ rule realign_pipe:
     shell:
         """
 
-       samtools collate -@{threads} --output-fmt BAM -uOn 128 {input.cram} /tmp/{wildcards.SM}.tmp |samtools bam2fq -@8 -t -s /dev/null | bwa-mem2 mem -K 100000000 -pt {threads} -Y {params.ref} -R "@RG\\tID:{wildcards.SM}\\tLB:{wildcards.SM}\\tSM:{wildcards.SM}\\tPL:ILLUMINA" - 2>> {log} | samblaster -a --addMateTags |samtools sort -T /tmp/{wildcards.SM} --write-index  -m 1G -l 1 -@ {threads}  -o {output.bam}##idx##{output.index}
+       samtools collate -@{threads} --output-fmt BAM -uOn 128 {input.cram} /tmp/{wildcards.SM}.tmp |\
+       samtools bam2fq -@8 -t -s /dev/null |\
+       bwa-mem2 mem -K 100000000 -pt {threads} -Y {params.ref} -R "@RG\\tID:{wildcards.SM}\\tLB:{wildcards.SM}\\tSM:{wildcards.SM}\\tPL:ILLUMINA" - 2>> {log} | \
+       samblaster -a --addMateTags |\
+       samtools sort -T /tmp/{wildcards.SM} --write-index  -m 2G -l 1 -@ {threads}  -o {output.bam}##idx##{output.index}
 
         """
-
-
-
-rule realign:
-    input:
-        cram="ingress/{SM}.cram",
-    output:
-        bam=temp("{SM}.sorted.bam"),
-        index=temp("{SM}.sorted.bam.bai"),
-    threads: 8
-    resources:
-        mem_mb=24000,
-    conda:
-        "../envs/optimised.yaml"
-    log:
-        "{SM}_bwa.log",
-    shadow:
-        "copy-minimal"
-    params:
-        ref=config["fasta"],
-        refold=config["fasta_input"],
-    benchmark:
-        "benchmarks/{SM}.bwa2.benchmark.txt"
-    shell:
-        """
-        echo "start $(date)"
-        samtools index -@ {threads} {input.cram}
-        echo "indexed $(date)"
-        samtools collate -@ {threads} --output-fmt BAM -uOn 128 {input.cram} {wildcards.SM}.tmp |samtools bam2fq -@ {threads} -t -s /dev/null -1 {wildcards.SM}.R1.fq.gz -2 {wildcards.SM}.R2.fq.gz - > /dev/null
-         echo "collated $(date)"
-        bwa-mem2 mem -K 100000000 -t {threads} -Y {params.ref} -R "@RG\\tID:{wildcards.SM}\\tLB:{wildcards.SM}\\tSM:{wildcards.SM}\\tPL:ILLUMINA" {wildcards.SM}.R1.fq.gz {wildcards.SM}.R2.fq.gz 2>> {log} | samblaster -a --addMateTags | samtools view -h1 --threads {threads} -o  {wildcards.SM}.aln.bam
-         echo "bwa $(date)"
-        rm -f {wildcards.SM}.R1.fq.gz {wildcards.SM}.R2.fq.gz
-        samtools sort -T /tmp/{wildcards.SM} --write-index  -m 7G -l 1 -@ {threads} {wildcards.SM}.aln.bam -o {output.bam}##idx##{output.index}
-        echo "sorted $(date)"
-        """
-
 
 # BQSR_Loci=$(echo -L chr{1..22} | sed 's/ / -L /g' | sed 's/-L -L/-L/g')
 
 
 rule recalibrate_new:
     input:
-        bam="{SM}.sorted.bam",
-        bamindex="{SM}.sorted.bam.bai",
+        bam="results/{SM}/{SM}.sorted_pipe.bam",
+        index="results/{SM}/{SM}.sorted_pipe.bam.bai",
     output:
-        bam=temp("{SM}.bqsr.bam"),
-        metrics_dedup="{SM}.dedupMetrics.txt",
+        bam=temp("results/{SM}/{SM}.bqsr.bam"),
+        metrics_dedup="results/{SM}/{SM}.dedupMetrics.txt",
     log:
-        dedup="{SM}.dedup.log",
-        bqsr="{SM}.bqsr.log",
+        dedup="results/{SM}/log/{SM}.dedup.log",
+        bqsr="results/{SM}/log/{SM}.bqsr.log",
     resources:
         mem_mb=8000,
+        partition="fat"
     threads: 1
     priority: 50
     conda:
         "../envs/optimised.yaml"
     shadow:
-        "copy-minimal"
+        "shallow"
     params:
         ref=config["fasta"],
         dbSNP=config["dbSNP"],
@@ -167,12 +115,10 @@ rule recalibrate_new:
 
 rule convert2cram_with_oldsamtools:
     input:
-        bam="{SM}.bqsr.bam",
+        bam="results/{SM}/{SM}.bqsr.bam",
     output:
-        cram="results/{SM}/}{SM}.final-gatk.cram",
+        cram="results/{SM}/{SM}.final-gatk.cram",
         index="results/{SM}/{SM}.final-gatk.cram.crai",
-    shadow:
-        "copy-minimal"
     resources:
         mem_mb=2000,
     threads: 1
@@ -196,9 +142,7 @@ rule haplotype_per_chr:
         cram="results/{SM}/{SM}.final-gatk.cram",
         index="results/{SM}/{SM}.final-gatk.cram.crai",
     output:
-        temp("{SM}/gvf/{SM}-{chr}.g.vcf.gz"),
-    shadow:
-        "copy-minimal"
+        temp("results/{SM}/gvf/{SM}-{chr}.g.vcf.gz"),
     conda:
         "../envs/GATK_haplotyper.yaml"
     threads: 1
