@@ -1,7 +1,7 @@
 ## About
 This realignment pipeline is a reimplantation of the pipeline found at https://github.com/BrenKenna/data_processing. The original pipeline is tailored to run on the grid infrastructure.
 
-To increase reproducibility, portability and maintainability the code is reimplemented in Snakemake with identical use of commands and versions of programs (BWA,GATK,samtools). To check for discrepancy between the grid version and this version, a line-for-line comparison is done.
+To increase reproducibility, portability and maintainability the code is reimplemented in Snakemake with identical use of commands and versions of programs (BWA,GATK,samtools). To check for discrepancies between the grid version and this version, a line-for-line comparison is made.
 
 for the header:
 
@@ -15,7 +15,7 @@ This is done with an Hiseq 2500 sample and a Hiseq X sample. There were no chang
 
 
 # Optimisations:
-To make use of the current software version of tools and best practices there is also an updated workflow made. The pipeline is tailored to a system with 8GB of memory per core and has a fast "scratch" space mounted at /tmp.
+To use the current software version of tools and best practices, an updated workflow is also made. The pipeline is tailored to a system with 8GB of memory per core and has a fast "scratch" space mounted at /tmp.
 
 - Replaced bwa with bwa-mem2 
 - Updated samtools to 1.13 (from 1.9)
