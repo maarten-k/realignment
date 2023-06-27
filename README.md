@@ -1,7 +1,7 @@
 ## About
-This realignment pipeline is reimplantation the pipeline found at https://github.com/BrenKenna/data_processing. The original pipeline is tailored to run on the grid infrastructure.
+This realignment pipeline is a reimplantation of the pipeline found at https://github.com/BrenKenna/data_processing. The original pipeline is tailored to run on the grid infrastructure.
 
-To increase reproducibility, portability and maintainability the code is reimplemented in Snakemake with identical use of commands and version of programs (BWA,GATK,samtools). To check for discrepanty between the grid version and this version, a line for line comparison is done.
+To increase reproducibility, portability and maintainability the code is reimplemented in Snakemake with identical use of commands and versions of programs (BWA,GATK,samtools). To check for discrepancy between the grid version and this version, a line-for-line comparison is done.
 
 for the header:
 
@@ -11,7 +11,7 @@ for the reads:
 
 `comm -23 <(samtools view -x RG sample1_new.final-gatk.cram) <(samtools view -x RG sample1_old.final-gatk.cram )`
 
-This is done with an Hiseq 2500 sample and a Hiseq X sample. There were no changes found, except for some paths in the header of the file. This has no consequences on further analysis.
+This is done with an Hiseq 2500 sample and a Hiseq X sample. There were no changes found, except for some paths in the header of the file. This doesn't have any consequences for further analysis.
 
 
 # Optimisations:
@@ -25,7 +25,7 @@ To make use of the current software version of tools and best practices there is
 - Print reads uses one core instead of 8 cores (7 times more efficient in core hours) (see [Recommendations for performance optimizations when using GATK3.8 and GATK4](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6842142/) fig 1 a)
 - Removed sorting a bam file
 - HaplotypeCaller runs now in parallel instead of serial per chromosome (reduces wall time)
-- Bcftools is used for merging the gvcf files 
+- Bcftools is used for merging the GVCF files 
 
 To ensure the same results, the final cram produced uses an old version of samtools which has a minor bug when creating MD tags.
 
@@ -33,7 +33,7 @@ To ensure the same results, the final cram produced uses an old version of samto
 
 # computational costs
 
-To give a ballpark figure, timings for 1 sample is show in this table.
+To give a ballpark figure, timings for 1 sample is shown in this table.
 
 |                                 | New pipeline     |            | original pipeline |            |
 |---------------------------------|:----------------:|:----------:|-------------------|------------|
@@ -68,8 +68,8 @@ sampleid4	/another/is/here/sample4.cram
 ```
 The input files should be cram files.
 
-- Edit `config/config.yaml` and correct the "list_of_files" line to the just created tab separate list with samples and paths.
-Here is also the option to use the ooriginalor optimised pipeline: to use the optimised pipeline set the  "original" option to False.
+- Edit `config/config.yaml` and correct the "list_of_files" line to the created tab separate list with samples and paths.
+Here is also the option to use the original optimised pipeline: to use the optimised pipeline set the  "original" option to False.
 
 - Run the pipeline with:
 
